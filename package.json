@@ -1,0 +1,21 @@
+{
+  "name": "music-rank-h5",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @music-rank/web dev",
+    "dev:all": "pnpm --parallel --filter @music-rank/web --filter @music-rank/api dev",
+    "dev:api": "pnpm --filter @music-rank/api dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.10"
+  }
+}
