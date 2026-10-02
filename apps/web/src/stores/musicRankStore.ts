@@ -2,7 +2,7 @@ import { inject, ref, type InjectionKey } from 'vue';
 import type { Router } from 'vue-router';
 import type { ArtistCandidate, CatalogSnapshot } from '@music-rank/contracts';
 import { getArtistCatalog, searchArtists } from '../services/catalog.ts';
-import { loadSession } from '../services/sessionStore.ts';
+import { clearCatalogDraft, loadCatalogDraft, loadSession, saveCatalogDraft } from '../services/sessionStore.ts';
 import { shouldConfirmSessionReplacement } from '../services/sessionPolicy.ts';
 import { useRankingFlow } from '../composables/useRankingFlow.ts';
 import { useShareFlow } from '../composables/useShareFlow.ts';
@@ -31,6 +31,7 @@ export function createMusicRankStore(router: Router) {
   const pendingArtist = ref<ArtistCandidate | null>(null);
   const replacementDialogOpen = ref(false);
   const catalogOptions = {};
+  let initialization: Promise<void> | null = null;
 
   function navigateTo(page: AppPage, replace = false) {
     const path = pagePath[page];
@@ -84,6 +85,12 @@ export function createMusicRankStore(router: Router) {
       searchMessage.value = result.message ?? '暂时无法加载曲库。';
       return;
     }
+    try {
+      await saveCatalogDraft(catalog.value);
+      storageWarning.value = false;
+    } catch {
+      storageWarning.value = true;
+    }
     navigateTo('catalog');
   }
 
@@ -115,20 +122,32 @@ export function createMusicRankStore(router: Router) {
     rankingSessionId.value = null;
     catalog.value = null;
     selectedArtist.value = null;
+    await clearCatalogDraft().catch(() => { storageWarning.value = true; });
     savedSessionExists.value = activeSessionInfo.value?.completion !== 'completed' && activeSessionInfo.value !== null;
     navigateTo('search', true);
   }
 
-  async function initialize() {
-    if (router.currentRoute.value.name === 'share') return;
-    try {
-      const saved = await loadSession();
-      savedSessionExists.value = Boolean(saved && saved.ranking.completion !== 'completed');
-      activeSessionInfo.value = saved ? { artistId: saved.artistId, completion: saved.ranking.completion } : null;
-      rankingSessionId.value = saved?.sessionId ?? null;
-    } catch {
-      storageWarning.value = true;
-    }
+  function initialize(routeName?: string): Promise<void> {
+    if (initialization) return initialization;
+    initialization = (async () => {
+      try {
+        const saved = await loadSession();
+        savedSessionExists.value = Boolean(saved && saved.ranking.completion !== 'completed');
+        activeSessionInfo.value = saved ? { artistId: saved.artistId, completion: saved.ranking.completion } : null;
+        if (saved) rankingFlow.restoreSession(saved);
+
+        if (routeName === 'catalog') {
+          const draft = await loadCatalogDraft();
+          if (draft && (!saved || draft.updatedAt > saved.updatedAt)) {
+            selectedArtist.value = draft.catalog.artist;
+            catalog.value = draft.catalog;
+          }
+        }
+      } catch {
+        storageWarning.value = true;
+      }
+    })();
+    return initialization;
   }
 
   return {

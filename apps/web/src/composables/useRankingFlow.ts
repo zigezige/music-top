@@ -9,7 +9,7 @@ import {
   recordChoice,
 } from '@music-rank/ranking';
 import type { ComparisonGroup } from '@music-rank/ranking';
-import { clearSession, loadSession, saveSession, type RankingSession } from '../services/sessionStore.ts';
+import { clearCatalogDraft, clearSession, loadSession, saveSession, type RankingSession, type SavedSession } from '../services/sessionStore.ts';
 import { extendCalibrationBudget, getRankingIdentity, hasSpentCalibrationBudget } from '../services/sessionPolicy.ts';
 
 type Artist = CatalogSnapshot['artist'];
@@ -70,8 +70,10 @@ export function useRankingFlow(options: RankingFlowOptions) {
     const artist = options.selectedArtist.value;
     if (!ranking.value || !catalog || !artist) return;
     try {
+      const sessionId = options.rankingSessionId.value ?? createSessionId();
+      options.rankingSessionId.value = sessionId;
       await saveSession({
-        sessionId: options.rankingSessionId.value ?? createSessionId(),
+        sessionId,
         artistId: artist.id,
         catalog,
         includedTrackIds: catalog.tracks.map((track) => track.id),
@@ -100,6 +102,7 @@ export function useRankingFlow(options: RankingFlowOptions) {
     rankingResult.value = getRankingResult(ranking.value);
     options.navigateTo(currentGroup.value ? 'ranking' : 'results');
     await persist(false);
+    await clearCatalogDraft().catch(() => undefined);
   }
 
   async function submitChoice(trackId: string | null) {
@@ -120,6 +123,17 @@ export function useRankingFlow(options: RankingFlowOptions) {
     options.navigateTo('paused');
   }
 
+  function restoreSession(saved: SavedSession) {
+    options.selectedArtist.value = saved.catalog.artist;
+    options.catalog.value = saved.catalog;
+    options.rankingSessionId.value = saved.sessionId || null;
+    ranking.value = saved.ranking;
+    rankingResult.value = getRankingResult(saved.ranking);
+    currentGroup.value = getNextGroup(saved.ranking);
+    options.activeSessionInfo.value = { artistId: saved.artistId, completion: saved.ranking.completion };
+    options.savedSessionExists.value = saved.ranking.completion !== 'completed';
+  }
+
   async function resumeRanking() {
     if (ranking.value) {
       currentGroup.value = getNextGroup(ranking.value);
@@ -131,12 +145,8 @@ export function useRankingFlow(options: RankingFlowOptions) {
     try {
       const saved = await loadSession();
       if (!saved) return;
-      options.selectedArtist.value = saved.catalog.artist;
-      options.catalog.value = saved.catalog;
-      options.rankingSessionId.value = saved.sessionId || createSessionId();
-      ranking.value = saved.ranking;
-      rankingResult.value = getRankingResult(saved.ranking);
-      currentGroup.value = getNextGroup(saved.ranking);
+      restoreSession(saved);
+      if (!options.rankingSessionId.value) options.rankingSessionId.value = createSessionId();
       options.navigateTo(currentGroup.value ? 'ranking' : 'results');
       await persist(saved.paused);
     } catch {
@@ -205,6 +215,7 @@ export function useRankingFlow(options: RankingFlowOptions) {
     calibrationBudgetSpent,
     currentRankingIdentity,
     persist,
+    restoreSession,
     beginRanking,
     submitChoice,
     pauseRanking,

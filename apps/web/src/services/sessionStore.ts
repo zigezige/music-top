@@ -16,6 +16,12 @@ export interface SavedSession {
   updatedAt: string;
 }
 
+export interface CatalogDraft {
+  id: 'active';
+  catalog: CatalogSnapshot;
+  updatedAt: string;
+}
+
 interface SavedShare {
   id: string;
   rankingIdentity: string;
@@ -27,11 +33,13 @@ interface SavedShare {
 
 class MusicRankDatabase extends Dexie {
   sessions!: EntityTable<SavedSession, 'id'>;
+  catalogDrafts!: EntityTable<CatalogDraft, 'id'>;
   shares!: EntityTable<SavedShare, 'id'>;
 
   constructor() {
     super('music-rank-h5');
     this.version(1).stores({ sessions: 'id, updatedAt', shares: 'id, createdAt' });
+    this.version(2).stores({ sessions: 'id, updatedAt', catalogDrafts: 'id, updatedAt', shares: 'id, createdAt' });
   }
 }
 
@@ -52,6 +60,18 @@ export async function loadSession(): Promise<SavedSession | undefined> {
 
 export async function clearSession(): Promise<void> {
   await database.sessions.delete('active');
+}
+
+export async function saveCatalogDraft(catalog: CatalogSnapshot): Promise<void> {
+  await database.catalogDrafts.put({ id: 'active', catalog, updatedAt: new Date().toISOString() });
+}
+
+export async function loadCatalogDraft(): Promise<CatalogDraft | undefined> {
+  return database.catalogDrafts.get('active');
+}
+
+export async function clearCatalogDraft(): Promise<void> {
+  await database.catalogDrafts.delete('active');
 }
 
 export async function saveShare(share: SavedShare): Promise<void> {

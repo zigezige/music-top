@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { useMusicRankStore } from './stores/musicRankStore.ts';
 import ShareDialog from './components/ShareDialog.vue';
 import ReplaceSessionDialog from './components/ReplaceSessionDialog.vue';
 
 const store = useMusicRankStore();
+const route = useRoute();
 const {
   storageWarning,
   notice,
@@ -20,12 +21,11 @@ const {
   pendingArtist,
 } = store;
 
-onMounted(() => void store.initialize());
 </script>
 
 <template>
-  <main class="app-shell">
-    <header class="topbar">
+  <main class="app-shell" :class="{ 'catalog-layout': route.name === 'catalog' }">
+    <header v-if="route.name === 'search'" class="topbar">
       <button class="wordmark" type="button" @click="store.restart" aria-label="听序首页">
         <span class="wordmark-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         <span>听序</span>
@@ -36,7 +36,11 @@ onMounted(() => void store.initialize());
     <div v-if="storageWarning" class="inline-warning" role="status">本地保存暂不可用，离开此页面后可能无法恢复当前进度。</div>
     <div v-if="notice" class="inline-warning" role="status">{{ notice }}<button type="button" class="text-button" @click="notice = ''">知道了</button></div>
 
-    <RouterView />
+    <RouterView v-slot="{ Component }">
+      <KeepAlive :include="['SearchView', 'CatalogView', 'RankingView', 'PausedView', 'ResultsView']">
+        <component :is="Component" />
+      </KeepAlive>
+    </RouterView>
 
     <ShareDialog
       :open="shareDialogOpen"
