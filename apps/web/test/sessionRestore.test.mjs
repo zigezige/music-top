@@ -6,6 +6,8 @@ import { createRankingSession, getNextGroup } from '@music-rank/ranking';
 
 const { clearCatalogDraft, clearSession, saveCatalogDraft, saveSession } = await import('../src/services/sessionStore.ts');
 const { createMusicRankStore } = await import('../src/stores/musicRankStore.ts');
+const { appRoutes } = await import('../src/router.ts');
+const { createRouteGuard } = await import('../src/services/routePolicy.ts');
 
 const artist = { id: 'qqmusic:artist-1', name: '测试歌手', sourceName: '测试歌手', sourceArtistId: 'artist-1' };
 const catalog = {
@@ -19,7 +21,7 @@ const catalog = {
 };
 
 function createStore() {
-  const router = createRouter({ history: createMemoryHistory(), routes: [] });
+  const router = createRouter({ history: createMemoryHistory(), routes: appRoutes });
   return createMusicRankStore(router);
 }
 
@@ -34,6 +36,86 @@ test('initializes a direct catalog route from its persisted catalog draft', asyn
   assert.deepEqual(store.catalog.value, catalog);
   assert.deepEqual(store.selectedArtist.value, artist);
   await clearCatalogDraft();
+});
+
+test('loads a catalog draft when catalog is entered after initial app restoration', async () => {
+  await clearSession();
+  await clearCatalogDraft();
+
+  const store = createStore();
+  await store.initialize('search');
+  await saveCatalogDraft(catalog);
+  await store.initialize('catalog');
+
+  assert.deepEqual(store.catalog.value, catalog);
+  assert.deepEqual(store.selectedArtist.value, artist);
+  await clearCatalogDraft();
+});
+
+test('restores catalog from the current history entry when browser storage is unavailable', async () => {
+  await clearSession();
+  await clearCatalogDraft();
+  const history = createMemoryHistory();
+  const router = createRouter({ history, routes: [] });
+  history.push('/catalog', { catalog });
+
+  const store = createMusicRankStore(router);
+  await store.initialize('catalog');
+
+  assert.deepEqual(store.catalog.value, catalog);
+  assert.deepEqual(store.selectedArtist.value, artist);
+});
+
+test('keeps catalog navigation after selecting an artist', async () => {
+  await clearSession();
+  await clearCatalogDraft();
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', name: 'search', component: {} },
+      { path: '/catalog', name: 'catalog', component: {} },
+    ],
+  });
+  const store = createMusicRankStore(router);
+  const guard = createRouteGuard(store.initialize, () => ({
+    hasCatalog: Boolean(store.catalog.value),
+    hasRanking: Boolean(store.ranking.value),
+    hasCurrentGroup: Boolean(store.currentGroup.value),
+  }));
+  router.beforeEach((to) => guard(String(to.name ?? '')));
+  await router.push('/');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, async json() { return { snapshot: catalog }; } });
+  try {
+    await store.chooseArtist(artist);
+    assert.deepEqual(store.catalog.value, catalog);
+    assert.equal(router.currentRoute.value.name, 'catalog');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await clearCatalogDraft();
+  }
+});
+
+test('keeps catalog history state structured-cloneable after selecting an artist', async () => {
+  await clearSession();
+  await clearCatalogDraft();
+  const navigations = [];
+  const router = {
+    options: { history: { state: {} } },
+    push: async (location) => { navigations.push(structuredClone(location)); },
+    replace: async (location) => { navigations.push(structuredClone(location)); },
+  };
+  const store = createMusicRankStore(router);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, async json() { return { snapshot: catalog }; } });
+  try {
+    await store.chooseArtist(artist);
+    assert.equal(navigations[0].path, '/catalog');
+    assert.deepEqual(navigations[0].state.catalog, catalog);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await clearCatalogDraft();
+  }
 });
 
 test('initializes ranking, paused, and results routes from the persisted session', async () => {

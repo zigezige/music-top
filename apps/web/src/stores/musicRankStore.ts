@@ -1,5 +1,5 @@
-import { inject, ref, type InjectionKey } from 'vue';
-import type { Router } from 'vue-router';
+import { inject, ref, toRaw, type InjectionKey } from 'vue';
+import type { HistoryState, Router } from 'vue-router';
 import type { ArtistCandidate, CatalogSnapshot } from '@music-rank/contracts';
 import { getArtistCatalog, searchArtists } from '../services/catalog.ts';
 import { clearCatalogDraft, loadCatalogDraft, loadSession, saveCatalogDraft } from '../services/sessionStore.ts';
@@ -31,11 +31,23 @@ export function createMusicRankStore(router: Router) {
   const pendingArtist = ref<ArtistCandidate | null>(null);
   const replacementDialogOpen = ref(false);
   const catalogOptions = {};
-  let initialization: Promise<void> | null = null;
+  let baseInitialization: Promise<void> | null = null;
+  const initializedRoutes = new Set<string>();
 
-  function navigateTo(page: AppPage, replace = false) {
+  async function navigateTo(page: AppPage, replace = false): Promise<void> {
     const path = pagePath[page];
-    void (replace ? router.replace(path) : router.push(path));
+    const state = page === 'catalog' && catalog.value
+      ? { catalog: toRaw(catalog.value) as unknown as HistoryState }
+      : undefined;
+    const location = state ? { path, state } : path;
+    await (replace ? router.replace(location) : router.push(location));
+  }
+
+  function readHistoryCatalog(): CatalogSnapshot | null {
+    const candidate = router.options.history.state.catalog;
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+    if (!('artist' in candidate) || !('tracks' in candidate) || !Array.isArray(candidate.tracks)) return null;
+    return candidate as unknown as CatalogSnapshot;
   }
 
   function goBack(fallbackPage: AppPage) {
@@ -91,7 +103,7 @@ export function createMusicRankStore(router: Router) {
     } catch {
       storageWarning.value = true;
     }
-    navigateTo('catalog');
+    await navigateTo('catalog');
   }
 
   async function chooseArtist(artist: ArtistCandidate) {
@@ -124,30 +136,43 @@ export function createMusicRankStore(router: Router) {
     selectedArtist.value = null;
     await clearCatalogDraft().catch(() => { storageWarning.value = true; });
     savedSessionExists.value = activeSessionInfo.value?.completion !== 'completed' && activeSessionInfo.value !== null;
-    navigateTo('search', true);
+    await navigateTo('search', true);
   }
 
-  function initialize(routeName?: string): Promise<void> {
-    if (initialization) return initialization;
-    initialization = (async () => {
-      try {
-        const saved = await loadSession();
-        savedSessionExists.value = Boolean(saved && saved.ranking.completion !== 'completed');
-        activeSessionInfo.value = saved ? { artistId: saved.artistId, completion: saved.ranking.completion } : null;
-        if (saved) rankingFlow.restoreSession(saved);
+  async function restoreBaseState(): Promise<void> {
+    try {
+      const saved = await loadSession();
+      savedSessionExists.value = Boolean(saved && saved.ranking.completion !== 'completed');
+      activeSessionInfo.value = saved ? { artistId: saved.artistId, completion: saved.ranking.completion } : null;
+      if (saved) rankingFlow.restoreSession(saved);
+    } catch {
+      storageWarning.value = true;
+    }
+  }
 
-        if (routeName === 'catalog') {
-          const draft = await loadCatalogDraft();
-          if (draft && (!saved || draft.updatedAt > saved.updatedAt)) {
-            selectedArtist.value = draft.catalog.artist;
-            catalog.value = draft.catalog;
-          }
-        }
-      } catch {
-        storageWarning.value = true;
+  async function initialize(routeName?: string): Promise<void> {
+    if (!baseInitialization) baseInitialization = restoreBaseState();
+    await baseInitialization;
+
+    if (routeName !== 'catalog' || initializedRoutes.has(routeName)) return;
+    const historyCatalog = readHistoryCatalog();
+    if (historyCatalog) {
+      selectedArtist.value = historyCatalog.artist;
+      catalog.value = historyCatalog;
+      initializedRoutes.add(routeName);
+      return;
+    }
+    try {
+      const saved = await loadSession();
+      const draft = await loadCatalogDraft();
+      if (draft && (!saved || draft.updatedAt > saved.updatedAt)) {
+        selectedArtist.value = draft.catalog.artist;
+        catalog.value = draft.catalog;
       }
-    })();
-    return initialization;
+      initializedRoutes.add(routeName);
+    } catch {
+      storageWarning.value = true;
+    }
   }
 
   return {

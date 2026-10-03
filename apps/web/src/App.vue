@@ -33,7 +33,7 @@ const {
       <span class="topbar-note">YOUR MUSIC, YOUR ORDER</span>
     </header>
 
-    <div v-if="storageWarning" class="inline-warning" role="status">本地保存暂不可用，离开此页面后可能无法恢复当前进度。</div>
+    <div v-if="storageWarning" class="inline-warning" role="status">浏览器本地存储不可用，离开此页面后可能无法恢复当前进度。</div>
     <div v-if="notice" class="inline-warning" role="status">{{ notice }}<button type="button" class="text-button" @click="notice = ''">知道了</button></div>
 
     <RouterView v-slot="{ Component }">
